@@ -19,8 +19,50 @@ let waveStart = 0;
 
 let beatInterval = 60/waves[currentWave].bpm;
 let nextBeatTime = 0;
-const allowedWindow = 0.12;
+const allowedWindow = 0.12; // seconds
 let lastBeatHandled = false;
+
+// Audio (WebAudio) for heartbeat independent of RAF
+let audioCtx = null;
+let audioScheduled = false;
+function ensureAudio(){
+  if(audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playBeatAt(time){
+  if(!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 80;
+  g.gain.value = 0.0001;
+  osc.connect(g);
+  g.connect(audioCtx.destination);
+  const now = audioCtx.currentTime;
+  const t = Math.max(now, time);
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.linearRampToValueAtTime(0.14, t + 0.001);
+  g.gain.linearRampToValueAtTime(0.0001, t + 0.08);
+  osc.start(now);
+  osc.stop(t + 0.1);
+}
+function scheduleAudioLoop(){
+  if(!audioCtx) return;
+  if(audioScheduled) return;
+  audioScheduled = true;
+  function tick(){
+    if(gameOver || state===STATE.STORY){ audioScheduled = false; return; }
+    const now = performance.now()/1000;
+    const delta = nextBeatTime - now;
+    if(delta <= 0.05){
+      // schedule immediate beat
+      playBeatAt(audioCtx.currentTime + Math.max(0, delta));
+      nextBeatTime += beatInterval;
+    }
+    setTimeout(tick, 10);
+  }
+  tick();
+}
 
 let obstacles = [];
 let spawnedIndex = 0;
@@ -38,6 +80,8 @@ function startWave(index){
   gameOver = false;
   deathReason = '';
   overlay.classList.add('hidden');
+  ensureAudio();
+  scheduleAudioLoop();
 }
 
 function fail(reason){
@@ -60,6 +104,15 @@ restartBtn.addEventListener('click', ()=>{
 });
 addEventListener('keydown', e=>{
   if(e.code==='KeyR') resetWave();
+});
+
+overlay.addEventListener('click', (e)=>{
+  // if in STORY, clicking overlay proceeds to next wave
+  if(state === STATE.STORY){
+    state = STATE.SURVIVAL;
+    const next = (currentWave + 1) % waves.length;
+    startWave(next);
+  }
 });
 
 let spacePressed = false;
@@ -131,6 +184,7 @@ function handlePointerUp(e){
 
 function update(dt, now){
   if(gameOver) return;
+  if(state === STATE.STORY) return;
   const t = now/1000;
   const elapsed = t - waveStart;
   const wd = waves[currentWave];
@@ -140,6 +194,12 @@ function update(dt, now){
   }
   if(t > nextBeatTime + allowedWindow){
     fail('정지 - 박자를 놓쳤습니다');
+  }
+  // wave end -> STORY phase
+  if(elapsed >= wd.length){
+    state = STATE.STORY;
+    overlay.classList.remove('hidden');
+    messageEl.textContent = '휴식 구간 — 저주에 관한 단서가 드러납니다. 클릭하여 계속';
   }
   for(const ob of obstacles){
     if(ob.type==='hold' && ob.holdStart){
@@ -155,14 +215,30 @@ function draw(now){
   const centerX = W/2, centerY = H/2;
   const t = now/1000;
   const phase = Math.min(1, Math.max(0, 1 - Math.abs(t - nextBeatTime)/allowedWindow));
+  // UI degradation based on wave progress
+  const wd = waves[currentWave];
+  const elapsed = Math.max(0, t - waveStart);
+  const progress = Math.min(1, wd ? elapsed / wd.length : 0);
+  const jitter = progress * 8;
   const radius = 60 + 40*phase;
   ctx.fillStyle = '#111';
-  ctx.beginPath(); ctx.arc(centerX,centerY,120,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle = '#ff4d4f'; ctx.beginPath(); ctx.arc(centerX,centerY,radius,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(centerX + (Math.random()-0.5)*jitter,centerY + (Math.random()-0.5)*jitter,120 - progress*30,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ff4d4f'; ctx.beginPath(); ctx.arc(centerX + (Math.random()-0.5)*jitter,centerY + (Math.random()-0.5)*jitter,radius - progress*8,0,Math.PI*2); ctx.fill();
+
+  // Guide line (fades/jitters)
+  ctx.strokeStyle = `rgba(255,255,255,${Math.max(0.2, 1-progress)})`;
+  ctx.lineWidth = 2 + (1-phase)*3;
+  ctx.beginPath();
+  ctx.moveTo(centerX - 200 + (Math.random()-0.5)*jitter, centerY + 140 + (Math.random()-0.5)*jitter);
+  ctx.lineTo(centerX + 200 + (Math.random()-0.5)*jitter, centerY + 140 + (Math.random()-0.5)*jitter);
+  ctx.stroke();
 
   for(const ob of obstacles){
     ctx.save();
     ctx.translate(ob.x, ob.y);
+    const shakeX = (Math.random()-0.5)*progress*6;
+    const shakeY = (Math.random()-0.5)*progress*6;
+    ctx.translate(shakeX, shakeY);
     if(ob.type==='click'){
       ctx.fillStyle = '#f1c40f';
       ctx.beginPath(); ctx.arc(0,0,ob.size/2,0,Math.PI*2); ctx.fill();
