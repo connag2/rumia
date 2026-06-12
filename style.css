@@ -1,0 +1,6 @@
+html,body{height:100%;margin:0;background:#0b0b0d;color:#fff;font-family:Inter,Segoe UI,Arial}
+#gameCanvas{display:block;width:100vw;height:100vh}
+#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,0.6)}
+.hidden{display:none}
+#message{background:#111;padding:20px 24px;border-radius:8px;margin-bottom:12px;min-width:260px;text-align:center;font-size:18px}
+#restartBtn{padding:10px 14px;border-radius:6px;border:0;background:#c0392b;color:#fff;font-weight:600;cursor:pointer}
